@@ -1,39 +1,95 @@
----
-title: Translating Wokwi
-sidebar_label: Translating
-description: Contribute translations for Wokwi so even more people can enjoy using it!
----
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
 
-This page explains how you can contribute translations to Wokwi.
+# ==========================================
+# 1. المعاملات الفيزيائية والميكانيكية للمحاكاة
+# ==========================================
+m = 0.045      # الكتلة الفعالة (kg) [المغناطيس + Tip Mass]
+f_res = 25.0   # التردد الطبيعي المستهدف للرنين (Hz)
+omega_n = 2 * np.pi * f_res
+k = m * (omega_n ** 2) # الصلابة الميكانيكية للهيكل المخروطي (N/m)
+zeta = 0.03    # نسبة التخميد الميكانيكي (Mechanical Damping Ratio)
+c = 2 * zeta * m * omega_n
 
-## Translating the user interface
+# المعاملات الكهربائية
+theta = 0.0025  # معامل الإزدواج الكهروضغطي للـ PZT (N/V)
+alpha_em = 0.8  # معامل الحث الكهرومغناطيسي للوشيعة (V·s/m)
+Cp = 15e-9      # سعة شريحة الـ PZT الكهربائية (Farad)
+RL = 100e3      # مقاومة الحمل (Ohm) [LTC3588 Equivalent Input]
+c_e = (alpha_em**2) / 10.0  # التخميد الكهرومغناطيسي المضاف
 
-To translate the user interface into a new language, download the current version of the [English strings file](https://wokwi.com/api/i18n/en.json). The translation file is a text file in the standard JSON format. It can be edited by any text editor, as well as many translation tools.
+# معطيات الإثارة الميكانيكية (الاهتزاز)
+A_g = 1.5 * 9.81 # تسارع الاهتزاز الخارجي (1.5g)
+F0 = m * A_g     # القوة الميكانيكية المؤثرة
+f_ext = 25.0     # تردد اهتزاز الآلة (Hz)
 
-If you wish to contribute translations to one of the existing language, you can download the translation file for the specific language from the list on [this issue](https://github.com/wokwi/wokwi-features/issues/221), and work your way from there.
+# ==========================================
+# 2. المعادلة التفاضلية للنظام الهجين
+# ==========================================
+def hybrid_harvester(t, y):
+    x, v, V_pzt = y
+    
+    # القوة الخارجية المترددة
+    F_ext = F0 * np.sin(2 * np.pi * f_ext * t)
+    
+    # 1. معادلة الحركة الميكانيكية (Mechanical DOF)
+    dxdt = v
+    dvdt = (F_ext - (c + c_e) * v - k * x - theta * V_pzt) / m
+    
+    # 2. المعادلة الكهربائية للـ PZT (Piezoelectric DOF)
+    dV_pzt_dt = (theta * v - V_pzt / RL) / Cp
+    
+    return [dxdt, dvdt, dV_pzt_dt]
 
-When you are ready to submit your translations, please [open an issue](https://github.com/wokwi/wokwi-features/issues/new?assignees=&labels=enhancement&template=translation.md&title=) and attach the file. GitHub doesn't support directly attaching JSON files, so you can either copy the content of the file into your new issue, or zip it and attach the Zip file.
+# ==========================================
+# 3. حل المعادلة زمنياً (Time-Domain Simulation)
+# ==========================================
+t_span = (0, 0.5)  # زمن المحاكاة (0.5 ثانية)
+t_eval = np.linspace(t_span[0], t_span[1], 2000)
+y0 = [0.0, 0.0, 0.0] # الشروط الابتدائية
 
-Not all the texts are currently available for translation, but we're adding new texts all the time. You can subscribe to [this issue](https://github.com/wokwi/wokwi-features/issues/221) to get a notification whenever new texts are available for translation.
+sol = solve_ivp(hybrid_harvester, t_span, y0, t_eval=t_eval, method='RK45')
 
-### Existing translations
+# حساب الجهد الكهرومغناطيسي وتيار الوشيعة
+V_em = alpha_em * sol.y[1] # V = B*L*v
+P_pzt = (sol.y[2]**2) / RL
+P_em = (V_em**2) / 10.0
+P_total_mW = (P_pzt + P_em) * 1000 # القدرة بالمللي واط
 
-- [Arabic](https://wokwi.com/projects/new/esp32?lang=ar)
-- [Chinese (simplified)](https://wokwi.com/projects/new/esp32?lang=zh)
-- [Chinese (traditional)](https://wokwi.com/projects/new/esp32?lang=zh-Hant)
-- [Czech](https://wokwi.com/projects/new/esp32?lang=cs)
-- [Dutch](https://wokwi.com/projects/new/esp32?lang=nl)
-- [Finnish](https://wokwi.com/projects/new/esp32?lang=fi)
-- [French](https://wokwi.com/projects/new/esp32?lang=fr)
-- [German](https://wokwi.com/projects/new/esp32?lang=de)
-- [Hungarian](https://wokwi.com/projects/new/esp32?lang=hu)
-- [Italian](https://wokwi.com/projects/new/esp32?lang=it)
-- [Norwegian](https://wokwi.com/projects/new/esp32?lang=nb-NO)
-- [Polish](https://wokwi.com/projects/new/esp32?lang=pl)
-- [Portuguese](https://wokwi.com/projects/new/esp32?lang=pt-BR)
-- [Russian](https://wokwi.com/projects/new/esp32?lang=ru)
-- [Slovenian](https://wokwi.com/projects/new/esp32?lang=sl)
-- [Spanish (spain)](https://wokwi.com/projects/new/esp32?lang=es-ES)
-- [Turkish](https://wokwi.com/projects/new/esp32?lang=tr)
-- [Ukrainian](https://wokwi.com/projects/new/esp32?lang=uk)
-- [Vietnamese](https://wokwi.com/projects/new/esp32?lang=vi)
+# ==========================================
+# 4. رسم النتائج والمخططات البيانية
+# ==========================================
+plt.figure(figsize=(12, 8))
+
+# الرسم الأول: الإزاحة الميكانيكية للهيكل
+plt.subplot(3, 1, 1)
+plt.plot(sol.t, sol.y[0] * 1000, 'b-', label='Mechanical Displacement (mm)')
+plt.ylabel('Displacement [mm]')
+plt.title('VibraCharge AI - Hybrid Energy Harvester Dynamic Simulation')
+plt.grid(True)
+plt.legend()
+
+# الرسم الثاني: الجهد الكهربائي المتولد (PZT + EM)
+plt.subplot(3, 3, 4)
+plt.plot(sol.t, sol.y[2], 'r-', label='PZT Voltage (V)')
+plt.ylabel('Voltage [V]')
+plt.grid(True)
+plt.legend()
+
+plt.subplot(3, 3, 5)
+plt.plot(sol.t, V_em, 'g-', label='Electromagnetic Voltage (V)')
+plt.ylabel('Voltage [V]')
+plt.grid(True)
+plt.legend()
+
+# الرسم الثالث: القدرة الإجمالية المحصودة (mW)
+plt.subplot(3, 1, 3)
+plt.plot(sol.t, P_total_mW, 'm-', label='Total Harvested Power (mW)')
+plt.xlabel('Time [s]')
+plt.ylabel('Power [mW]')
+plt.grid(True)
+plt.legend()
+
+plt.tight_layout()
+plt.show()
